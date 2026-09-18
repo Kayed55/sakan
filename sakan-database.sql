@@ -1,5 +1,6 @@
 BEGIN;
-begin;
+
+
 create extension if not exists btree_gist;
 create schema if not exists private;
 revoke all on schema private from public;
@@ -175,9 +176,8 @@ create policy support_read on public.support_requests for select to authenticate
 create policy support_insert on public.support_requests for insert to authenticated with check(customer_id=auth.uid() and status='open' and (booking_id is null or exists(select 1 from public.bookings b where b.id=booking_id and b.customer_id=auth.uid())));
 create policy settings_admin on public.settings for all to authenticated using(public.has_permission('settings.write')) with check(public.has_permission('settings.write'));
 create policy audit_admin on public.audit_logs for select to authenticated using(public.has_permission('audit.read'));
-commit;
 
-begin;
+
 create function private.expire_holds(p_unit uuid) returns void language plpgsql set search_path='' as $$
 begin
  update public.bookings set status='expired' where unit_id=p_unit and status='hold' and hold_expires_at<=now();
@@ -347,9 +347,8 @@ grant execute on function public.create_booking_hold(uuid,date,date,int,uuid,tex
 grant execute on function public.record_verified_payment(text,uuid,text,text,int,text) to service_role;
 grant all on all tables in schema public to service_role;
 grant usage,select on all sequences in schema public to service_role;
-commit;
 
-begin;
+
 drop policy reviews_insert on public.reviews;
 create policy reviews_insert on public.reviews for insert to authenticated with check(customer_id=auth.uid() and not published and exists(select 1 from public.bookings b where b.id=reviews.booking_id and b.customer_id=auth.uid() and b.unit_id=reviews.unit_id and b.status='completed'));
 create function private.validate_settings() returns trigger language plpgsql set search_path='' as $$
@@ -406,10 +405,9 @@ revoke execute on function private.validate_settings() from public,anon,authenti
 revoke execute on function public.approve_refund(uuid,int,text),public.record_verified_refund(uuid,text,int),public.send_notification(uuid,text,text),public.approve_cancellation(uuid) from public,anon,authenticated;
 grant execute on function public.approve_refund(uuid,int,text),public.send_notification(uuid,text,text),public.approve_cancellation(uuid) to authenticated;
 grant execute on function public.record_verified_refund(uuid,text,int) to service_role;
-commit;
 
 -- Supabase Storage only. Test harness provisions the same minimal tables for policy checks.
-begin;
+
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) values
  ('unit-images','unit-images',true,10485760,array['image/jpeg','image/png','image/webp']),
  ('operations','operations',false,10485760,array['image/jpeg','image/png','image/webp']) on conflict(id) do nothing;
@@ -417,9 +415,8 @@ create policy unit_image_upload on storage.objects for insert to authenticated w
 create policy unit_image_update on storage.objects for update to authenticated using(bucket_id='unit-images' and public.has_permission('catalog.write')) with check(bucket_id='unit-images' and public.has_permission('catalog.write'));
 create policy unit_image_delete on storage.objects for delete to authenticated using(bucket_id='unit-images' and public.has_permission('catalog.write'));
 create policy operations_files on storage.objects for all to authenticated using(bucket_id='operations' and public.has_permission('operations.write')) with check(bucket_id='operations' and public.has_permission('operations.write'));
-commit;
 
-begin;
+
 create function public.set_cover_image(p_image uuid) returns void language plpgsql security definer set search_path='' as $$
 declare u uuid;
 begin
@@ -446,6 +443,6 @@ create trigger audit_reviews after update on public.reviews for each row execute
 create trigger audit_support after update on public.support_requests for each row execute function private.audit_change();
 revoke execute on function public.set_cover_image(uuid),public.moderate_review(uuid,boolean),public.resolve_support(uuid) from public,anon,authenticated;
 grant execute on function public.set_cover_image(uuid),public.moderate_review(uuid,boolean),public.resolve_support(uuid) to authenticated;
-commit;
+
 
 COMMIT;
