@@ -1,0 +1,9 @@
+{
+  "name": "sakan-deployment-checks",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "lint": "bash vercel-check.sh",
+    "typecheck": "bash vercel-check.sh"
+  }
+}
