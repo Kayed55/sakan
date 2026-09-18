@@ -470,4 +470,72 @@ end $$;
 revoke all on function public.save_property_with_address(jsonb,text) from public,anon;
 grant execute on function public.save_property_with_address(jsonb,text) to authenticated;
 
-COMMIT;
+
+create table public.booking_messages (
+ id bigint generated always as identity primary key,
+ booking_id uuid not null references public.bookings(id),
+ sender_id uuid not null references public.profiles(id),
+ sender_kind text not null check(sender_kind in ('customer','support')),
+ request_id uuid not null,
+ body text not null check(length(btrim(body)) between 1 and 4000),
+ created_at timestamptz not null default now(),
+ unique(sender_id,request_id)
+);
+create index booking_messages_history on public.booking_messages(booking_id,id desc);
+create table public.booking_chat_reads (
+ booking_id uuid not null references public.bookings(id),
+ user_id uuid not null references public.profiles(id),
+ last_message_id bigint not null,
+ primary key(booking_id,user_id)
+);
+create function public.can_read_booking_chat(p_booking uuid) returns boolean
+language sql stable security definer set search_path='' as $$
+ select exists(select 1 from public.profiles p where p.id=auth.uid() and p.status='active')
+ and exists(select 1 from public.bookings b where b.id=p_booking and (b.customer_id=auth.uid() or public.has_permission('customer.read')))
+$$;
+alter table public.booking_messages enable row level security;
+alter table public.booking_chat_reads enable row level security;
+create policy chat_read on public.booking_messages for select to authenticated using(public.can_read_booking_chat(booking_id));
+create policy chat_watermark_read on public.booking_chat_reads for select to authenticated using(user_id=auth.uid() and public.can_read_booking_chat(booking_id));
+revoke all on public.booking_messages,public.booking_chat_reads from anon,authenticated;
+grant select on public.booking_messages,public.booking_chat_reads to authenticated;
+create function public.send_booking_message(p_booking uuid,p_body text,p_request uuid) returns public.booking_messages
+language plpgsql security definer set search_path='' as $$
+declare result public.booking_messages; owner_id uuid;
+begin
+ if not public.can_read_booking_chat(p_booking) then raise exception 'CHAT_FORBIDDEN'; end if;
+ if p_request is null or p_body is null or length(btrim(p_body)) not between 1 and 4000 then raise exception 'INVALID_MESSAGE'; end if;
+ select customer_id into owner_id from public.bookings where id=p_booking for update;
+ select * into result from public.booking_messages where sender_id=auth.uid() and request_id=p_request;
+ if found then
+  if result.booking_id<>p_booking or result.body<>btrim(p_body) then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
+  return result;
+ end if;
+ if (select count(*) from public.booking_messages where booking_id=p_booking and sender_id=auth.uid() and created_at>now()-interval '1 minute')>=20 then raise exception 'CHAT_RATE_LIMIT'; end if;
+ insert into public.booking_messages(booking_id,sender_id,sender_kind,request_id,body)
+ values(p_booking,auth.uid(),case when owner_id=auth.uid() then 'customer' else 'support' end,p_request,btrim(p_body)) returning * into result;
+ return result;
+end $$;
+create function public.mark_booking_chat_read(p_booking uuid,p_message bigint) returns void
+language plpgsql security definer set search_path='' as $$
+begin
+ if not public.can_read_booking_chat(p_booking) then raise exception 'CHAT_FORBIDDEN'; end if;
+ if not exists(select 1 from public.booking_messages where id=p_message and booking_id=p_booking) then raise exception 'INVALID_MESSAGE'; end if;
+ insert into public.booking_chat_reads values(p_booking,auth.uid(),p_message)
+ on conflict(booking_id,user_id) do update set last_message_id=greatest(public.booking_chat_reads.last_message_id,excluded.last_message_id);
+end $$;
+create function public.booking_chat_inbox(p_offset int default 0) returns table(booking_id uuid,booking_number text,customer_name text,body text,created_at timestamptz,unread_count bigint)
+language plpgsql stable security definer set search_path='' as $$
+begin
+ if not public.has_permission('customer.read') then raise exception 'CHAT_FORBIDDEN'; end if;
+ return query select b.id,b.booking_number::text,p.full_name,m.body,m.created_at,
+ (select count(*) from public.booking_messages n where n.booking_id=b.id and n.sender_id<>auth.uid() and n.id>coalesce(r.last_message_id,0))
+ from public.bookings b join public.profiles p on p.id=b.customer_id
+ join lateral(select x.body,x.created_at,x.id from public.booking_messages x where x.booking_id=b.id order by x.id desc limit 1) m on true
+ left join public.booking_chat_reads r on r.booking_id=b.id and r.user_id=auth.uid()
+ order by m.id desc limit 50 offset greatest(0,least(coalesce(p_offset,0),100000));
+end $$;
+revoke all on function public.can_read_booking_chat(uuid),public.send_booking_message(uuid,text,uuid),public.mark_booking_chat_read(uuid,bigint),public.booking_chat_inbox(int) from public,anon;
+grant execute on function public.can_read_booking_chat(uuid),public.send_booking_message(uuid,text,uuid),public.mark_booking_chat_read(uuid,bigint),public.booking_chat_inbox(int) to authenticated;
+
+commit;
