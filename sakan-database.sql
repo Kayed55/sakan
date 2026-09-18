@@ -445,4 +445,29 @@ revoke execute on function public.set_cover_image(uuid),public.moderate_review(u
 grant execute on function public.set_cover_image(uuid),public.moderate_review(uuid,boolean),public.resolve_support(uuid) to authenticated;
 
 
+
+alter table public.properties alter column approx_lat drop not null;
+alter table public.properties alter column approx_lng drop not null;
+alter table public.properties add constraint properties_location_pair check (
+ (approx_lat is null and approx_lng is null) or
+ (approx_lat is not null and approx_lng is not null and approx_lat between -90 and 90 and approx_lng between -180 and 180)
+) not valid;
+create function public.save_property_with_address(p_property jsonb,p_address text)
+returns uuid language plpgsql security invoker set search_path='' as $$
+declare target_id uuid := coalesce((p_property->>'id')::uuid,gen_random_uuid());
+begin
+ if not public.has_permission('catalog.write') then raise exception 'Forbidden' using errcode='42501'; end if;
+ if p_address is null or length(trim(p_address))=0 or length(p_address)>1000 then raise exception 'Invalid address'; end if;
+ insert into public.properties(id,district_id,code,name_ar,name_en,approx_lat,approx_lng,is_active)
+ values(target_id,(p_property->>'district_id')::uuid,p_property->>'code',p_property->>'name_ar',p_property->>'name_en',
+ (p_property->>'approx_lat')::numeric,(p_property->>'approx_lng')::numeric,coalesce((p_property->>'is_active')::boolean,true))
+ on conflict(id) do update set district_id=excluded.district_id,code=excluded.code,name_ar=excluded.name_ar,name_en=excluded.name_en,
+ approx_lat=excluded.approx_lat,approx_lng=excluded.approx_lng,is_active=excluded.is_active;
+ insert into public.property_private(property_id,address) values(target_id,trim(p_address))
+ on conflict(property_id) do update set address=excluded.address;
+ return target_id;
+end $$;
+revoke all on function public.save_property_with_address(jsonb,text) from public,anon;
+grant execute on function public.save_property_with_address(jsonb,text) to authenticated;
+
 COMMIT;
