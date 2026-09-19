@@ -3,13 +3,6 @@
   "installCommand": "echo Flutter dependencies are installed during build",
   "buildCommand": "tar -xzf sakan-source.tar.gz && bash scripts/vercel-build.sh",
   "outputDirectory": "dist",
-  "redirects": [
-    {
-      "source": "/",
-      "destination": "/customer/",
-      "permanent": false
-    }
-  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -23,6 +16,12 @@
           "value": "strict-origin-when-cross-origin"
         }
       ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/customer/index.html"
     }
   ]
 }
