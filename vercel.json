@@ -30,6 +30,11 @@
   ],
   "redirects": [
     {
+      "source": "/customer/",
+      "destination": "/",
+      "permanent": true
+    },
+    {
       "source": "/customer",
       "destination": "/",
       "permanent": true
