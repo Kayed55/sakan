@@ -20,8 +20,29 @@
   ],
   "rewrites": [
     {
-      "source": "/",
-      "destination": "/customer/index.html"
+      "source": "/admin/:path*",
+      "destination": "/admin/index.html"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/customer",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/customer/:path*",
+      "destination": "/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/admin",
+      "destination": "/admin/",
+      "permanent": true
     }
   ]
 }
